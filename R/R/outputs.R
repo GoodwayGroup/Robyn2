@@ -179,7 +179,9 @@ robyn_outputs <- function(InputCollect, OutputModels,
           by = c("rn", "cluster")
         ) %>%
         left_join(
-          pareto_results$df_caov_pct_all,
+          pareto_results$df_caov_pct_all %>%
+            filter(.data$type == "Carryover") %>%
+            select("solID", "rn", "carryover_pct"),
           by = c("solID", "rn")
         )
       OutputCollect$mediaVecCollect <- left_join(
@@ -242,7 +244,8 @@ robyn_outputs <- function(InputCollect, OutputModels,
           pareto_df <- NULL
         }
         attr(OutputCollect, "runTime") <- round(
-          difftime(Sys.time(), t0, units = "mins"), 2)
+          difftime(Sys.time(), t0, units = "mins"), 2
+        )
         robyn_write(
           InputCollect = InputCollect,
           OutputCollect = OutputCollect,
