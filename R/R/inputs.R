@@ -775,13 +775,61 @@ prophet_decomp <- function(dt_transform, dt_holidays,
 
   # return (dt_transform)
 
+  #! EA START
+  # Extract prophet regressor coefficients
+  prophet_coefficients <- NULL
+  if (!is.null(prophet_model) && !is.null(prophet_model$params) && !is.null(prophet_model$params$beta)) {
+    # Get regressor names from extra_regressors
+    regressor_names <- names(prophet_model$extra_regressors)
+    
+    if (length(regressor_names) > 0 && ncol(prophet_model$params$beta) > 0) {
+      # Extract beta coefficients (mean across samples)
+      # beta is a matrix: rows are samples, columns are regressors
+      beta_matrix <- prophet_model$params$beta
+      
+      # Get the column indices for regressors (skip trend, seasonality components)
+      # Regressors start after the base components
+      n_base_components <- ncol(beta_matrix) - length(regressor_names)
+      regressor_indices <- (n_base_components + 1):ncol(beta_matrix)
+      
+      if (length(regressor_indices) == length(regressor_names)) {
+        # Calculate mean coefficient for each regressor across samples
+        regressor_coefs <- colMeans(beta_matrix[, regressor_indices, drop = FALSE])
+        
+        # Create data frame with regressor names and coefficients
+        prophet_coefficients <- data.frame(
+          regressor = regressor_names,
+          coefficient = as.numeric(regressor_coefs),
+          stringsAsFactors = FALSE
+        )
+      } else {
+        # Fallback: try to match by position or extract all extra regressor columns
+        # Prophet stores regressors in extra_regressors, and their coefficients in beta
+        # The order should match
+        if (ncol(beta_matrix) >= length(regressor_names)) {
+          # Take the last columns matching the number of regressors
+          start_idx <- ncol(beta_matrix) - length(regressor_names) + 1
+          regressor_coefs <- colMeans(beta_matrix[, start_idx:ncol(beta_matrix), drop = FALSE])
+          
+          prophet_coefficients <- data.frame(
+            regressor = regressor_names,
+            coefficient = as.numeric(regressor_coefs),
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+  
   #! SH START
   # Needed to return multiple objects
   prophet_custom_output <- list(prophet_model = prophet_model,
-              prophet_input = prophet_input)
+              prophet_input = prophet_input,
+              prophet_coefficients = prophet_coefficients)
   return(list(dt_transform = dt_transform,
               prophet_custom_output = prophet_custom_output))
   #! SH END
+  #! EA END
 }
 
 exposure_handling <- function(dt_transform,
