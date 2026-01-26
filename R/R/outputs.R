@@ -333,7 +333,7 @@ robyn_csv <- function(InputCollect, OutputCollect, csv_out = NULL, export = TRUE
         !is.null(InputCollect$prophet_custom_output$prophet_coefficients)) {
       prophet_coefs <- InputCollect$prophet_custom_output$prophet_coefficients
       if (!is.null(prophet_coefs) && nrow(prophet_coefs) > 0) {
-        write.csv(prophet_coefs, paste0(plot_folder, "prophet_regressor_coefficients.csv"), row.names = FALSE)
+        write.csv(prophet_coefs, paste0(plot_folder, "prophet_regressor_coefficients.csv"), row.names = TRUE)
       }
     }
     #! EA END
