@@ -661,6 +661,58 @@ robyn_engineering <- function(x, quiet = FALSE, ...) {
   return(InputCollect)
 }
 
+#! EA START
+
+####################################################################
+#' Helper function to build the output DataFrame for prophet 
+#' regressor coefficients..
+#'
+#' @param regressor_names Character vector of regressor names.
+#' @param coefs Numeric vector of coefficients.
+#' @return A DataFrame containing the prophet regressor coefficients
+#'         or NULL if coefficients/regressors can't be extracted.
+build_prophet_coefficients_df <- function(regressor_names, coefs) {
+  prophet_coefficients <- data.frame(
+    regressor = regressor_names,
+    coefficient = as.numeric(coefs),
+    stringsAsFactors = FALSE
+  )
+
+  return(prophet_coefficients)
+}
+
+####################################################################
+#' This function extracts the prophet regressor coefficients 
+#' from the prophet model.
+#'
+#' @param prophet_model Prophet model object.
+#' @return A DataFrame containing the prophet regressor coefficients
+#'         or NULL if coefficients/regressors can't be extracted.
+extract_prophet_regressor_coefs <- function(prophet_model) {
+  if (is.null(prophet_model)) return(NULL)
+  if (is.null(prophet_model$params) || is.null(prophet_model$params$beta)) return(NULL)
+  if (is.null(prophet_model$extra_regressors)) return(NULL)
+
+  regressor_names <- names(prophet_model$extra_regressors)
+  if (length(regressor_names) == 0) return(NULL)
+
+  beta_matrix <- prophet_model$params$beta
+  if (is.null(dim(beta_matrix)) || ncol(beta_matrix) == 0) return(NULL)
+
+  # regressors are the last K columns 
+  k <- length(regressor_names)
+  if (ncol(beta_matrix) < k) return(NULL)
+
+  # In most Prophet implementations, extra regressors live in the last K beta columns.
+  start_idx <- ncol(beta_matrix) - k + 1
+  regressor_cols <- start_idx:ncol(beta_matrix)
+
+  coefs <- colMeans(beta_matrix[, regressor_cols, drop = FALSE])
+  prophet_coefficients <- build_prophet_coefficients_df(regressor_names, coefs)
+  
+  return(prophet_coefficients)
+}
+#! EA END
 
 ####################################################################
 #' Conduct prophet decomposition
@@ -776,50 +828,7 @@ prophet_decomp <- function(dt_transform, dt_holidays,
   # return (dt_transform)
 
   #! EA START
-  # Extract prophet regressor coefficients
-  prophet_coefficients <- NULL
-  if (!is.null(prophet_model) && !is.null(prophet_model$params) && !is.null(prophet_model$params$beta)) {
-    # Get regressor names from extra_regressors
-    regressor_names <- names(prophet_model$extra_regressors)
-    
-    if (length(regressor_names) > 0 && ncol(prophet_model$params$beta) > 0) {
-      # Extract beta coefficients (mean across samples)
-      # beta is a matrix: rows are samples, columns are regressors
-      beta_matrix <- prophet_model$params$beta
-      
-      # Get the column indices for regressors (skip trend, seasonality components)
-      # Regressors start after the base components
-      n_base_components <- ncol(beta_matrix) - length(regressor_names)
-      regressor_indices <- (n_base_components + 1):ncol(beta_matrix)
-      
-      if (length(regressor_indices) == length(regressor_names)) {
-        # Calculate mean coefficient for each regressor across samples
-        regressor_coefs <- colMeans(beta_matrix[, regressor_indices, drop = FALSE])
-        
-        # Create data frame with regressor names and coefficients
-        prophet_coefficients <- data.frame(
-          regressor = regressor_names,
-          coefficient = as.numeric(regressor_coefs),
-          stringsAsFactors = FALSE
-        )
-      } else {
-        # Fallback: try to match by position or extract all extra regressor columns
-        # Prophet stores regressors in extra_regressors, and their coefficients in beta
-        # The order should match
-        if (ncol(beta_matrix) >= length(regressor_names)) {
-          # Take the last columns matching the number of regressors
-          start_idx <- ncol(beta_matrix) - length(regressor_names) + 1
-          regressor_coefs <- colMeans(beta_matrix[, start_idx:ncol(beta_matrix), drop = FALSE])
-          
-          prophet_coefficients <- data.frame(
-            regressor = regressor_names,
-            coefficient = as.numeric(regressor_coefs),
-            stringsAsFactors = FALSE
-          )
-        }
-      }
-    }
-  }
+  prophet_coefficients <- extract_prophet_regressor_coefs(prophet_model)
   
   #! SH START
   # Needed to return multiple objects
