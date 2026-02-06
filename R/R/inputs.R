@@ -707,15 +707,38 @@ add_reference_levels_to_prophet_coefficients <- function(prophet_coefficients,
     
     # Get all levels of the raw factor column
     factor_col_raw <- factor_data[[factor_var]]
-    levels <- if (is.factor(factor_col_raw)) levels(factor_col_raw) else as.character(unique(factor_col_raw))
-    levels <- levels[!is.na(levels)]
+    levels_for_factor <- if (is.factor(factor_col_raw)) levels(factor_col_raw) else as.character(unique(factor_col_raw))
+    levels_for_factor <- levels_for_factor[!is.na(levels_for_factor)]
+    n_levels_for_factor <- length(levels_for_factor)
 
-    if (length(levels) == 0L) next
+    if (n_levels_for_factor == 0L) next
+    
+    # Get all OHE columns for the factor
+    ohe_cols_full_for_factor <- paste0(factor_var, "_", levels_for_factor)
+    
+    # Get present regressors names and amount for the factor
+    present_regressors_for_factor <- present_regressors[grepl(paste0("^", factor_var, "_"), present_regressors)]
+    n_present_regressors_for_factor <- length(present_regressors_for_factor)
 
-    ohe_cols_full <- paste0(factor_var, "_", levels)
+    # Get omitted regressors names and amount for the factor
+    omitted_regressors_for_factor <- setdiff(ohe_cols_full_for_factor, present_regressors_for_factor)
+    n_omitted_regressors_for_factor <- length(omitted_regressors_for_factor)
 
-    # Get the names of the reference levels that Prophet omitted
-    omitted_regressors <- c(omitted_regressors, setdiff(ohe_cols_full, present_regressors))
+    # Add omitted regressors for factor names to the general omitted regressors list
+    omitted_regressors <- c(omitted_regressors, omitted_regressors_for_factor)
+
+    # Regressors names and amount the factor should have (omitted will be added later out of this loop)
+    all_regressors_for_factor <- c(present_regressors_for_factor, omitted_regressors_for_factor)
+    n_all_regressors_for_factor <- length(all_regressors_for_factor)
+
+    # Check if the total amount of regressors is equal to the number of unique values for the factor
+    if (n_all_regressors_for_factor != n_levels_for_factor) {
+      stop(
+        "Factor '", factor_var, "': number of regressors (", n_all_regressors_for_factor,
+        ") != number of unique values (", n_levels_for_factor, "). ",
+        "Regressors: ", paste(all_regressors_for_factor, collapse = ", ")
+      )
+    }
   }
 
   # Add the reference levels to the prophet_coefficients DF with coefficient 0
