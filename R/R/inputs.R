@@ -664,21 +664,26 @@ robyn_engineering <- function(x, quiet = FALSE, ...) {
 #! EA START
 
 ####################################################################
-#' Helper function to build the output DataFrame for prophet 
-#' regressor coefficients..
+#' Helper function to build the output DataFrame for prophet
+#' regressor coefficients.
 #'
 #' @param regressor_names Character vector of regressor names.
 #' @param coefs Numeric vector of coefficients.
-#' @return A DataFrame containing the prophet regressor coefficients
-#'         or NULL if coefficients/regressors can't be extracted.
+#' @return A data frame with columns factor_var, level, regressor, and coefficient
+#'        (first two NA until filled in
+#'        add_reference_levels_to_prophet_coefficients()).
 build_prophet_coefficients_df <- function(regressor_names, coefs) {
+  n <- length(regressor_names)
+
   prophet_coefficients <- data.frame(
+    factor_var = rep(NA_character_, n),
+    level = rep(NA_character_, n),
     regressor = regressor_names,
     coefficient = as.numeric(coefs),
     stringsAsFactors = FALSE
   )
 
-  message("Prophet coefficients DF built (without reference levels)")
+  message("\nProphet coefficients DF built (without reference levels)\n")
 
   return(prophet_coefficients)
 }
@@ -686,21 +691,26 @@ build_prophet_coefficients_df <- function(regressor_names, coefs) {
 ####################################################################
 #' Add omitted reference levels to prophet regressor coefficients.
 #'
-#' When \code{ohse(redundant = FALSE)} is used, one level per factor is dropped.
-#' This function identifies those omitted levels from \code{factor_data} and
-#' appends them to \code{prophet_coefficients} with coefficient 0.
+#' When ohse(redundant = FALSE) is used, one level per factor is dropped.
+#' This function identifies those omitted levels from actor_data and
+#' appends them to prophet_coefficients with coefficient 0.
 #'
-#' @param prophet_coefficients Data frame with columns \code{regressor} and \code{coefficient}.
+#' @param prophet_coefficients Data frame with columns factor_var, level, regressor, and coefficient.
 #' @param factor_vars Character vector of factor variable names.
 #' @param factor_data Data frame containing the factor columns before one-hot encoding.
-#' @return The \code{prophet_coefficients} data frame with reference-level rows added (coef 0), sorted by \code{regressor}.
+#' @return The prophet_coefficients data frame with reference-level rows added
+#'   (coef 0), factor_var and level filled for factor OHE regressors
+#'   NA for non-factor extra regressors), sorted by regressor.
 add_reference_levels_to_prophet_coefficients <- function(prophet_coefficients,
                                                           factor_vars,
                                                           factor_data) {
   # Regressors estimated by Prophet
   present_regressors <- prophet_coefficients$regressor
-  # To store reference levels that Prophet omitted
-  omitted_regressors <- character(0L)
+  reference_level_parts <- list()
+  
+  all_ohe_regressor_names <- character()
+  all_factor_vars <- character()
+  all_levels <- character()
 
   for (factor_var in factor_vars) {
     if (!factor_var %in% names(factor_data)) next
@@ -713,23 +723,47 @@ add_reference_levels_to_prophet_coefficients <- function(prophet_coefficients,
 
     if (n_levels_for_factor == 0L) next
     
+    message("factor_var: ", factor_var)
+
     # Get all OHE columns for the factor
     ohe_cols_full_for_factor <- paste0(factor_var, "_", levels_for_factor)
-    
-    # Get present regressors names and amount for the factor
-    present_regressors_for_factor <- present_regressors[grepl(paste0("^", factor_var, "_"), present_regressors)]
+    message("ohe_cols_full_for_factor: ", paste(ohe_cols_full_for_factor, collapse = ", "))
+
+    all_ohe_regressor_names <- c(all_ohe_regressor_names, ohe_cols_full_for_factor)
+    all_factor_vars <- c(all_factor_vars, rep(factor_var, n_levels_for_factor))
+    all_levels <- c(all_levels, levels_for_factor)
+
+    # Prophet regressors that belong to this factor only: intersection of (1) names
+    # Prophet actually estimated and (2) exact OHE names from levels — not all of
+    # ohe_cols_full_for_factor. Exact names avoid prefix clashes (events_black_friday
+    # vs factor events_black + level friday when the true factor is events).
+    present_regressors_for_factor <- present_regressors[present_regressors %in% ohe_cols_full_for_factor]
     n_present_regressors_for_factor <- length(present_regressors_for_factor)
+
+    message("present_regressors_for_factor: ", paste(present_regressors_for_factor, collapse = ", "))
 
     # Get omitted regressors names and amount for the factor
     omitted_regressors_for_factor <- setdiff(ohe_cols_full_for_factor, present_regressors_for_factor)
     n_omitted_regressors_for_factor <- length(omitted_regressors_for_factor)
 
-    # Add omitted regressors for factor names to the general omitted regressors list
-    omitted_regressors <- c(omitted_regressors, omitted_regressors_for_factor)
+    message("omitted_regressors_for_factor (reference level): ", paste(omitted_regressors_for_factor, collapse = ", "))
+
+    # Create a list of Dataframes for the reference levels with coefficients 0 (one for each factor)
+    if (n_omitted_regressors_for_factor > 0L) {
+      reference_level_parts[[length(reference_level_parts) + 1L]] <- data.frame(
+        factor_var = factor_var,
+        level = levels_for_factor[match(omitted_regressors_for_factor, ohe_cols_full_for_factor)], 
+        regressor = omitted_regressors_for_factor,
+        coefficient = 0,
+        stringsAsFactors = FALSE
+      )
+    }
 
     # Regressors names and amount the factor should have (omitted will be added later out of this loop)
     all_regressors_for_factor <- c(present_regressors_for_factor, omitted_regressors_for_factor)
     n_all_regressors_for_factor <- length(all_regressors_for_factor)
+
+    message("all_regressors_for_factor: ", paste(all_regressors_for_factor, collapse = ", "), "\n")
 
     # Check if the total amount of regressors is equal to the number of unique values for the factor
     if (n_all_regressors_for_factor != n_levels_for_factor) {
@@ -741,14 +775,34 @@ add_reference_levels_to_prophet_coefficients <- function(prophet_coefficients,
     }
   }
 
-  # Add the reference levels to the prophet_coefficients DF with coefficient 0
-  if (length(omitted_regressors) > 0L) {
-    reference_levels_df <- data.frame(regressor = omitted_regressors, coefficient = 0, stringsAsFactors = FALSE)
+  # Add factor_var and level values to the prophet_coefficients DF based on the matches against all_ohe_regressor_names
+  if (length(all_ohe_regressor_names) > 0L) {
+    # just in case there are duplicate OHE names (shouldn't happen, but just in case)
+    keep_first_duplicate_ohe_name <- !duplicated(all_ohe_regressor_names) 
+
+    # index of the matches against the known OHE names
+    idx_matched_ohe <- match(prophet_coefficients$regressor, all_ohe_regressor_names[keep_first_duplicate_ohe_name])
+
+    # rows that match the known OHE names
+    row_matches_known_ohe <- !is.na(idx_matched_ohe)
+
+    # add the factor_var values to the prophet_coefficients DF
+    prophet_coefficients$factor_var[row_matches_known_ohe] <-
+      all_factor_vars[keep_first_duplicate_ohe_name][idx_matched_ohe[row_matches_known_ohe]]
+
+    # add the level values to the prophet_coefficients DF
+    prophet_coefficients$level[row_matches_known_ohe] <-
+      all_levels[keep_first_duplicate_ohe_name][idx_matched_ohe[row_matches_known_ohe]]
+  }
+
+  # Add the reference levels (list of Dataframes) to the prophet_coefficients DF
+  if (length(reference_level_parts) > 0L) {
+    reference_levels_df <- do.call(rbind, reference_level_parts)
     prophet_coefficients <- rbind(prophet_coefficients, reference_levels_df)
     prophet_coefficients <- prophet_coefficients[order(prophet_coefficients$regressor), , drop = FALSE]
     row.names(prophet_coefficients) <- NULL
 
-    message("Reference levels of factor variables added to Prophet coefficients DF")
+    message("Reference levels of factor variables added to Prophet coefficients DF\n")
   }
 
   return(prophet_coefficients)
@@ -761,13 +815,12 @@ add_reference_levels_to_prophet_coefficients <- function(prophet_coefficients,
 #' @param prophet_model Prophet model object.
 #' @param factor_vars Character vector of factor variable names.
 #' @param factor_data Data frame containing the factor columns
-#'   \emph{before} one-hot encoding (e.g. \code{dt_regressors}). Must contain
-#'   \code{factor_vars} columns. Used to derive all OHE level names so the
+#'   before one-hot encoding (e.g. dt_regressors). Must contain
+#'   factor_vars columns. Used to derive all OHE level names so the
 #'   omitted reference level can be added with coefficient 0 when
-#'   \code{ohse(redundant = FALSE)} was used.
-#' @return A DataFrame containing the prophet regressor coefficients
-#'         (including baseline level with coefficient 0 when requested),
-#'         or NULL if coefficients/regressors can't be extracted.
+#'   ohse(redundant = FALSE) was used.
+#' @return A data frame with columns factor_var, level,  (factor NA for non-factor
+#'   regressors), or NULL if coefficients/regressors cannot be extracted.
 extract_prophet_regressor_coefs <- function(prophet_model,
                                             factor_vars,
                                             factor_data) {
@@ -783,11 +836,11 @@ extract_prophet_regressor_coefs <- function(prophet_model,
   beta_matrix <- prophet_model$params$beta
   if (is.null(dim(beta_matrix)) || ncol(beta_matrix) == 0) return(NULL)
 
-  # regressors are the last K columns
+  # In most Prophet implementations, extra regressors live in the last K beta columns.
   k <- length(regressor_names)
   if (ncol(beta_matrix) < k) return(NULL)
 
-  # In most Prophet implementations, extra regressors live in the last K beta columns.
+  # Get the indices of the extra regressors in the beta matrix
   start_idx <- ncol(beta_matrix) - k + 1
   regressor_cols <- start_idx:ncol(beta_matrix)
 
@@ -803,7 +856,7 @@ extract_prophet_regressor_coefs <- function(prophet_model,
     factor_data
   )
 
-  message("Prophet coefficients DF built (with reference levels)")
+  message("Prophet coefficients DF built (with reference levels)\n")
 
   return(prophet_coefficients)
 }
