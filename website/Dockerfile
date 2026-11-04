@@ -1,4 +1,4 @@
-FROM node:lts
+FROM node:24.22.2-bookworm
 
 WORKDIR /app/website
 
