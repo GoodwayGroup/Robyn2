@@ -1,4 +1,4 @@
-FROM node:lts
+FROM node:26.13.1-trixie
 
 WORKDIR /app/website
 
